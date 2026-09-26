@@ -3,6 +3,7 @@ import { useState } from "react";
 import { StatCards } from "./StatCards";
 import { Pipeline } from "./Pipeline";
 import { ContractInfoPanel } from "./ContractInfoPanel";
+import { HealthWidget } from "./HealthWidget";
 import { RecentTxTable } from "./RecentTxTable";
 import { TxDetailModal } from "@/components/transactions/TxDetailModal";
 import { useLiveTransactions } from "@/lib/soroban/useLiveTransactions";
@@ -21,6 +22,7 @@ export function DashboardTab() {
       <Pipeline txs={txs} />
       <div className="dashboard-grid">
         <ContractInfoPanel info={contractInfo} />
+        <HealthWidget />
         <RecentTxTable txs={txs} onSelect={setSelected} />
       </div>
     </div>
