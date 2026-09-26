@@ -5,6 +5,7 @@ import { TransactionsTab } from "./transactions/TransactionsTab";
 import { AdminTab } from "./admin/AdminTab";
 import { DocsTab } from "./docs/DocsTab";
 import { TabErrorBoundary } from "@/components/ui/TabErrorBoundary";
+import { GuidedTour, useGuidedTour } from "@/components/onboarding/GuidedTour";
 import { AMBER, BG1, BORDER, DIM, MONO, STATUS_META } from "@/lib/constants";
 import { useSorobanStatus } from "@/lib/soroban/useSorobanStatus";
 import { useWallet } from "@/lib/wallet/WalletProvider";
@@ -20,6 +21,7 @@ export function Shell() {
   const { address, connecting, error, connect, disconnect } = useWallet();
   const connected = address !== null;
   const { toast } = useToast();
+  const tour = useGuidedTour();
 
   useEffect(() => {
     if (error) toast(error, "error");
@@ -58,6 +60,24 @@ export function Shell() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <button
+            onClick={tour.start}
+            aria-label="Start guided tour"
+            style={{
+              background: "none",
+              border: "none",
+              color: DIM,
+              fontFamily: MONO,
+              fontSize: 10,
+              letterSpacing: "0.1em",
+              cursor: "pointer",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = AMBER)}
+            onMouseLeave={(e) => (e.currentTarget.style.color = DIM)}
+          >
+            ? tour
+          </button>
           <span
             style={{
               fontSize: 9,
@@ -82,6 +102,7 @@ export function Shell() {
             }}
           />
           <button
+            data-tour="wallet"
             onClick={() => (connected ? disconnect() : connect())}
             disabled={connecting}
             style={{
@@ -110,12 +131,13 @@ export function Shell() {
       </header>
 
       {/* ── Tab Bar ── */}
-      <nav className="shell-nav" role="tablist" aria-label="Sections">
+      <nav className="shell-nav" role="tablist" aria-label="Sections" data-tour="nav">
         {TABS.map((t) => (
           <button
             key={t}
             role="tab"
             aria-selected={tab === t}
+            data-tour={t}
             onClick={() => setTab(t)}
             style={{
               padding: "12px 22px",
@@ -199,6 +221,9 @@ export function Shell() {
               : "connecting"}
         </span>
       </footer>
+
+      {/* ── Guided Tour ── */}
+      <GuidedTour open={tour.open} onClose={tour.close} />
     </div>
   );
 }
