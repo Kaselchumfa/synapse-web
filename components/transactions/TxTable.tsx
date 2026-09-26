@@ -1,5 +1,5 @@
 "use client";
-import { memo, useState, type CSSProperties } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { AMBER, BG3, BORDER, DIM, MONO } from "@/lib/constants";
@@ -11,6 +11,7 @@ const PAGE_SIZE = 15;
 interface TxTableProps {
   txs: Transaction[];
   onSelect: (tx: Transaction) => void;
+  query?: string;
 }
 
 const HEADERS = ["TX ID", "ASSET", "AMOUNT", "FROM", "TO", "STATUS", "RETRIES", "AGE"];
@@ -99,7 +100,54 @@ const TxRow = memo(function TxRow({ tx, onSelect }: TxRowProps) {
   );
 }, hasSameRenderedData);
 
-export function TxTable({ txs, onSelect }: TxTableProps) {
+/**
+ * Lightweight client-side fuzzy matcher over the in-memory transaction set.
+ * Matches across transaction ID, caller (from) address, and status, ranking
+ * results by relevance so partial fragments surface the most likely rows first.
+ */
+function fuzzyScore(tx: Transaction, query: string): number {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return 0;
+
+  const fields: Array<{ value: string; weight: number }> = [
+    { value: tx.id.toLowerCase(), weight: 3 },
+    { value: tx.from.toLowerCase(), weight: 2 },
+    { value: tx.status.toLowerCase(), weight: 1 },
+  ];
+
+  let best = 0;
+  for (const { value, weight } of fields) {
+    if (value === needle) {
+      best = Math.max(best, weight * 100);
+      continue;
+    }
+    const index = value.indexOf(needle);
+    if (index !== -1) {
+      // Earlier matches and longer contiguous matches rank higher.
+      const proximity = 1 - index / Math.max(value.length, 1);
+      best = Math.max(best, weight * (50 + proximity * 40 + needle.length));
+      continue;
+    }
+    // Subsequence (fuzzy) match: all query chars appear in order.
+    let cursor = 0;
+    let gaps = 0;
+    for (const char of needle) {
+      const found = value.indexOf(char, cursor);
+      if (found === -1) {
+        cursor = -1;
+        break;
+      }
+      gaps += found - cursor;
+      cursor = found + 1;
+    }
+    if (cursor !== -1) {
+      best = Math.max(best, weight * (10 + needle.length - gaps / Math.max(value.length, 1)));
+    }
+  }
+  return best;
+}
+
+export function TxTable({ txs, onSelect, query = "" }: TxTableProps) {
   const [page, setPage] = useState(1);
   const [knownLength, setKnownLength] = useState(txs.length);
   if (txs.length !== knownLength) {
@@ -107,9 +155,19 @@ export function TxTable({ txs, onSelect }: TxTableProps) {
     setPage(1);
   }
 
-  const totalPages = Math.max(1, Math.ceil(txs.length / PAGE_SIZE));
+  const filteredTxs = useMemo(() => {
+    const needle = query.trim();
+    if (!needle) return txs;
+    return txs
+      .map((tx) => ({ tx, score: fuzzyScore(tx, needle) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.tx);
+  }, [txs, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTxs.length / PAGE_SIZE));
   const start = (page - 1) * PAGE_SIZE;
-  const pageTxs = txs.slice(start, start + PAGE_SIZE);
+  const pageTxs = filteredTxs.slice(start, start + PAGE_SIZE);
 
   return (
     <div>
@@ -140,7 +198,7 @@ export function TxTable({ txs, onSelect }: TxTableProps) {
             {pageTxs.map((tx) => (
               <TxRow key={tx.id} tx={tx} onSelect={onSelect} />
             ))}
-            {txs.length === 0 && (
+            {filteredTxs.length === 0 && (
               <tr>
                 <td
                   colSpan={8}
@@ -160,7 +218,7 @@ export function TxTable({ txs, onSelect }: TxTableProps) {
         </table>
       </div>
 
-      {txs.length > PAGE_SIZE && (
+      {filteredTxs.length > PAGE_SIZE && (
         <div
           style={{
             display: "flex",
@@ -196,7 +254,7 @@ export function TxTable({ txs, onSelect }: TxTableProps) {
               letterSpacing: "0.06em",
             }}
           >
-            page {page} of {totalPages} · {txs.length} total
+            page {page} of {totalPages} · {filteredTxs.length} total
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { scValToNative } from "@stellar/stellar-sdk";
 import { TxTable } from "./TxTable";
 import { TxDetailModal } from "./TxDetailModal";
@@ -18,8 +18,49 @@ import type { Transaction } from "@/lib/types";
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID;
 
+const SEARCH_DEBOUNCE_MS = 200;
+
+/**
+ * Score a single transaction against a fuzzy query across tx id, caller
+ * address, and status. Returns 0 when there is no match, otherwise a
+ * relevance score (higher = better).
+ */
+function scoreTx(tx: Transaction, query: string): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return 0;
+  const fields: Array<{ value: string; weight: number }> = [
+    { value: tx.id, weight: 3 },
+    { value: tx.caller ?? "", weight: 2 },
+    { value: tx.status, weight: 1 },
+  ];
+  let best = 0;
+  for (const { value, weight } of fields) {
+    const hay = value.toLowerCase();
+    if (!hay) continue;
+    let score = 0;
+    if (hay === q) {
+      score = 100;
+    } else if (hay.startsWith(q)) {
+      score = 80;
+    } else if (hay.includes(q)) {
+      score = 60;
+    } else {
+      // subsequence (fuzzy) match: all query chars appear in order
+      let qi = 0;
+      for (let i = 0; i < hay.length && qi < q.length; i++) {
+        if (hay[i] === q[qi]) qi++;
+      }
+      if (qi === q.length) score = 30;
+    }
+    if (score > 0) best = Math.max(best, score * weight);
+  }
+  return best;
+}
+
 export function TransactionsTab() {
   const [filter, setFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [cb, setCb] = useState({ tx_id: "", callback_url: "", secret: "" });
   const [lookingUp, setLookingUp] = useState(false);
@@ -27,6 +68,11 @@ export function TransactionsTab() {
   const txs = useLiveTransactions();
   const { address, connect } = useWallet();
   const { toast } = useToast();
+
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [search]);
 
   async function runLookup() {
     if (!filter.trim()) {
@@ -98,13 +144,15 @@ export function TransactionsTab() {
     }
   }
 
-  const filtered = txs.filter(
-    (t) =>
-      t.id.includes(filter) ||
-      t.status.includes(filter.toUpperCase()) ||
-      t.asset.includes(filter.toUpperCase()) ||
-      t.memo.includes(filter)
-  );
+  const filtered = useMemo(() => {
+    const q = debouncedSearch.trim();
+    if (!q) return txs;
+    return txs
+      .map((t) => ({ t, score: scoreTx(t, q) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(({ t }) => t);
+  }, [txs, debouncedSearch]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }} className="animate-fade-in">
@@ -155,6 +203,26 @@ export function TransactionsTab() {
 
       {/* Full table */}
       <Panel title={`ALL TRANSACTIONS (${filtered.length})`}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="search tx_id · caller · status…"
+          aria-label="Search transactions"
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            marginBottom: 10,
+            background: BG3,
+            border: `1px solid ${BORDER}`,
+            color: "#eee",
+            fontFamily: MONO,
+            fontSize: 12,
+            padding: "9px 12px",
+            outline: "none",
+          }}
+          onFocus={(e) => (e.target.style.borderColor = "rgba(245,166,35,0.45)")}
+          onBlur={(e) => (e.target.style.borderColor = BORDER)}
+        />
         <TxTable txs={filtered} onSelect={setSelected} />
       </Panel>
 
